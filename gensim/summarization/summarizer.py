@@ -108,7 +108,7 @@ def summarize_corpus(hashable_corpus, ratio=0.2):
     return _pagerank(graph)
 
 
-def summarize(text, ratio=0.2, word_count=None, split=False):
+def summarize(in_sents, ratio=0.2, word_count=None, split=False):
     """
     Returns a summarized version of the given text using a variation of
     the TextRank algorithm.
