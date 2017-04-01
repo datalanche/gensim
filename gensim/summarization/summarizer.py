@@ -9,6 +9,7 @@ from gensim.summarization.pagerank_weighted import pagerank_weighted as _pageran
 from gensim.summarization.commons import build_graph as _build_graph
 from gensim.summarization.commons import remove_unreachable_nodes as _remove_unreachable_nodes
 from gensim.summarization.bm25 import get_bm25_weights as _bm25_weights
+from gensim.summarization.syntactic_unit import SyntacticUnit
 from gensim.corpora import Dictionary
 from math import log10 as _log10
 from six.moves import xrange
