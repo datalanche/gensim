@@ -4,8 +4,8 @@
 # Licensed under the GNU LGPL v2.1 - http://www.gnu.org/licenses/lgpl.html
 
 import logging
+from gensim.parsing.preprocessing import preprocess_documents
 from gensim.summarization.pagerank_weighted import pagerank_weighted as _pagerank
-from gensim.summarization.textcleaner import clean_text_by_sentences as _clean_text_by_sentences
 from gensim.summarization.commons import build_graph as _build_graph
 from gensim.summarization.commons import remove_unreachable_nodes as _remove_unreachable_nodes
 from gensim.summarization.bm25 import get_bm25_weights as _bm25_weights
@@ -63,72 +63,15 @@ def _create_valid_graph(graph):
             graph.add_edge(edge, 1)
 
 
-def _get_doc_length(doc):
-    return sum([item[1] for item in doc])
+def _build_dictionary(sentences):
+    tokens = []
+    for s in sentences:
+        if s['tokens'] != None:
+            tokens.append(s['tokens'])
+    return Dictionary(tokens)
 
 
-def _get_similarity(doc1, doc2, vec1, vec2):
-    numerator = vec1.dot(vec2.transpose()).toarray()[0][0]
-    length_1 = _get_doc_length(doc1)
-    length_2 = _get_doc_length(doc2)
-
-    denominator = _log10(length_1) + _log10(length_2) if length_1 > 0 and length_2 > 0 else 0
-
-    return numerator / denominator if denominator != 0 else 0
-
-
-def _build_corpus(sentences):
-    split_tokens = [sentence.token.split() for sentence in sentences]
-    dictionary = Dictionary(split_tokens)
-    return [dictionary.doc2bow(token) for token in split_tokens]
-
-
-def _get_important_sentences(sentences, corpus, important_docs):
-    hashable_corpus = _build_hasheable_corpus(corpus)
-    sentences_by_corpus = dict(zip(hashable_corpus, sentences))
-    return [sentences_by_corpus[tuple(important_doc)] for important_doc in important_docs]
-
-
-def _get_sentences_with_word_count(sentences, word_count):
-    """ Given a list of sentences, returns a list of sentences with a
-    total word count similar to the word count provided."""
-    length = 0
-    selected_sentences = []
-
-    # Loops until the word count is reached.
-    for sentence in sentences:
-        words_in_sentence = len(sentence.text.split())
-
-        # Checks if the inclusion of the sentence gives a better approximation
-        # to the word parameter.
-        if abs(word_count - length - words_in_sentence) > abs(word_count - length):
-            return selected_sentences
-
-        selected_sentences.append(sentence)
-        length += words_in_sentence
-
-    return selected_sentences
-
-
-def _extract_important_sentences(sentences, corpus, important_docs, word_count):
-    important_sentences = _get_important_sentences(sentences, corpus, important_docs)
-
-    # If no "word_count" option is provided, the number of sentences is
-    # reduced by the provided ratio. Else, the ratio is ignored.
-    return important_sentences if word_count is None else _get_sentences_with_word_count(important_sentences, word_count)
-
-
-def _format_results(extracted_sentences, split):
-    if split:
-        return [sentence.text for sentence in extracted_sentences]
-    return "\n".join([sentence.text for sentence in extracted_sentences])
-
-
-def _build_hasheable_corpus(corpus):
-    return [tuple(doc) for doc in corpus]
-
-
-def summarize_corpus(corpus, ratio=0.2):
+def summarize_corpus(hashable_corpus, ratio=0.2):
     """
     Returns a list of the most important documents of a corpus using a
     variation of the TextRank algorithm.
@@ -142,16 +85,15 @@ def summarize_corpus(corpus, ratio=0.2):
     The most important documents are returned as a list sorted by the
     document score, highest first.
 
-    """ % INPUT_MIN_LENGTH
-    hashable_corpus = _build_hasheable_corpus(corpus)
+    """
 
     # If the corpus is empty, the function ends.
-    if len(corpus) == 0:
+    if len(hashable_corpus) == 0:
         logger.warning("Input corpus is empty.")
         return
 
     # Warns the user if there are too few documents.
-    if len(corpus) < INPUT_MIN_LENGTH:
+    if len(hashable_corpus) < INPUT_MIN_LENGTH:
         logger.warning("Input corpus is expected to have at least " + str(INPUT_MIN_LENGTH) + " documents.")
 
     graph = _build_graph(hashable_corpus)
@@ -163,11 +105,7 @@ def summarize_corpus(corpus, ratio=0.2):
         logger.warning("Please add more sentences to the text. The number of reachable nodes is below 3")
         return
 
-    pagerank_scores = _pagerank(graph)
-
-    hashable_corpus.sort(key=lambda doc: pagerank_scores.get(doc, 0), reverse=True)
-
-    return [list(doc) for doc in hashable_corpus[:int(len(corpus) * ratio)]]
+    return _pagerank(graph)
 
 
 def summarize(text, ratio=0.2, word_count=None, split=False):
@@ -190,30 +128,49 @@ def summarize(text, ratio=0.2, word_count=None, split=False):
         word_count determines how many words will the output contain.
     If both parameters are provided, the ratio will be ignored.
     """
-    # Gets a list of processed sentences.
-    sentences = _clean_text_by_sentences(text)
+
+    num_ranked = 0
+    sentences = []
+    processed_sents = [' '.join(s) for s in preprocess_documents(in_sents)]
+    for i in range(len(in_sents)):
+
+        tokens = None
+        if processed_sents[i] != '':
+            tokens = SyntacticUnit(in_sents[i], processed_sents[i]).token.split()
+            num_ranked = num_ranked + 1
+
+        sentences.append({
+            'corpus': None,
+            'sequence': i + 1,
+            'rank': 0,
+            'text': in_sents[i],
+            'tokens': tokens
+        })
 
     # If no sentence could be identified, the function ends.
-    if len(sentences) == 0:
+    if num_ranked == 0:
         logger.warning("Input text is empty.")
         return
 
     # If only one sentence is present, the function raises an error (Avoids ZeroDivisionError).
-    if len(sentences) == 1:
+    if num_ranked == 1:
         raise ValueError("input must have more than one sentence")
 
     # Warns if the text is too short.
-    if len(sentences) < INPUT_MIN_LENGTH:
+    if num_ranked < INPUT_MIN_LENGTH:
         logger.warning("Input text is expected to have at least " + str(INPUT_MIN_LENGTH) + " sentences.")
 
-    corpus = _build_corpus(sentences)
+    hashable_corpus = []
+    dictionary = _build_dictionary(sentences)
+    for s in sentences:
+        if s['tokens'] != None:
+            s['corpus'] = tuple(dictionary.doc2bow(s['tokens']))
+            hashable_corpus.append(s['corpus'])
 
-    most_important_docs = summarize_corpus(corpus, ratio=ratio if word_count is None else 1)
+    pagerank_scores = summarize_corpus(hashable_corpus, ratio=ratio if word_count is None else 1)
 
-    # Extracts the most important sentences with the selected criterion.
-    extracted_sentences = _extract_important_sentences(sentences, corpus, most_important_docs, word_count)
+    for s in sentences:
+        if s['corpus'] in pagerank_scores:
+            s['rank'] = pagerank_scores[s['corpus']][0]
 
-    # Sorts the extracted sentences by apparition order in the original text.
-    extracted_sentences.sort(key=lambda s: s.index)
-
-    return _format_results(extracted_sentences, split)
+    return sentences
