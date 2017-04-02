@@ -130,7 +130,7 @@ def summarize(in_sents, ratio=0.2, word_count=None, split=False):
     If both parameters are provided, the ratio will be ignored.
     """
 
-    num_ranked = 0
+    num_rankable = 0
     sentences = []
     processed_sents = [' '.join(s) for s in preprocess_documents(in_sents)]
     for i in range(len(in_sents)):
@@ -138,7 +138,7 @@ def summarize(in_sents, ratio=0.2, word_count=None, split=False):
         tokens = None
         if processed_sents[i] != '':
             tokens = SyntacticUnit(in_sents[i], processed_sents[i]).token.split()
-            num_ranked = num_ranked + 1
+            num_rankable = num_rankable + 1
 
         sentences.append({
             'corpus': None,
@@ -148,18 +148,8 @@ def summarize(in_sents, ratio=0.2, word_count=None, split=False):
             'tokens': tokens
         })
 
-    # If no sentence could be identified, the function ends.
-    if num_ranked == 0:
-        logger.warning("Input text is empty.")
-        return
-
-    # If only one sentence is present, the function raises an error (Avoids ZeroDivisionError).
-    if num_ranked == 1:
-        raise ValueError("input must have more than one sentence")
-
-    # Warns if the text is too short.
-    if num_ranked < INPUT_MIN_LENGTH:
-        logger.warning("Input text is expected to have at least " + str(INPUT_MIN_LENGTH) + " sentences.")
+    if num_rankable < 2:
+        return sentences
 
     hashable_corpus = []
     dictionary = _build_dictionary(sentences)
@@ -170,8 +160,9 @@ def summarize(in_sents, ratio=0.2, word_count=None, split=False):
 
     pagerank_scores = summarize_corpus(hashable_corpus, ratio=ratio if word_count is None else 1)
 
-    for s in sentences:
-        if s['corpus'] in pagerank_scores:
-            s['rank'] = pagerank_scores[s['corpus']][0]
+    if pagerank_scores != None:
+        for s in sentences:
+            if s['corpus'] in pagerank_scores:
+                s['rank'] = pagerank_scores[s['corpus']][0]
 
     return sentences
